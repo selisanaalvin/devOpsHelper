@@ -11,6 +11,13 @@ This project provides APIs to generate a `Dockerfile` and a `.gitlab-ci.yml` con
 
 ## Usage
 
+- Install AWS CLI to your machine and configure
+  - `aws configure`
+- To Run the Helper
+  - `npm install`
+  - `npm install aws-sdk`
+  - `npm run start`
+
 ### Dockerfile Generation
 
 #### Endpoint
