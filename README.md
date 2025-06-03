@@ -82,7 +82,6 @@ This project provides APIs to generate a `Dockerfile` and a `.gitlab-ci.yml` con
 {
   "projectLocation": "C:/ProjectLocation",
   "functionName": "myLambdaFunction",
-  "handler": "handler",
   "runtime": "nodejs18.x"
 }
 ```
@@ -101,5 +100,38 @@ This project provides APIs to generate a `Dockerfile` and a `.gitlab-ci.yml` con
   "region": "us-east-1",
   "functionName": "myLambdaFunction",
   "roleArn": "arn:aws:iam::123456789012:role/YourLambdaExecutionRole"
+}
+```
+
+### Create S3 Bucket
+
+#### Endpoint
+
+`POST /create-s3-bucket`
+
+#### Payload
+
+```json
+{
+  "bucketName": "TestS3Bucket",
+  "region": "us-east-1"
+}
+```
+
+### Generate Lambda With CRUD Function to S3 Bucket
+
+#### Endpoint
+
+`POST /generate-s3-crud-lambda`
+
+#### Payload
+
+```json
+{
+  "projectLocation": "C:/ProjectLocation",
+  "functionName": "CrudS3Bucket",
+  "runtime": "nodejs18.x",
+  "bucketName": "TestS3Bucket",
+  "region": "us-east-1"
 }
 ```
