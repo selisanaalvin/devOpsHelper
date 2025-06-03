@@ -152,22 +152,16 @@ ${targetBranches.map((branch) => `        - ${branch}`).join("\n")}`;
 
 // Generate Lambda Function
 app.post("/generate-lambda-function", async (req, res) => {
-  const {
-    functionName,
-    handler,
-    runtime = "nodejs18.x",
-    projectLocation,
-  } = req.body;
+  const { functionName, runtime = "nodejs18.x", projectLocation } = req.body;
 
-  if (!functionName || !handler || !projectLocation) {
+  if (!functionName || !projectLocation) {
     return res.status(400).json({
-      error:
-        "Missing required fields: functionName, handler, or projectLocation",
+      error: "Missing required fields: functionName or projectLocation",
     });
   }
 
   const lambdaFileContent = `
-exports.${handler} = async (event, context) => {
+exports.handler = async (event, context) => {
   return {
     statusCode: 200,
     body: JSON.stringify({ message: "Hello from Lambda!" }),
@@ -187,7 +181,7 @@ exports.${handler} = async (event, context) => {
     const metadata = `
 FunctionName: ${functionName}
 Runtime: ${runtime}
-Handler: index.${handler}
+Handler: index.handler
     `.trim();
     const metadataPath = path.join(lambdaDirectory, "metadata.txt");
     await fs.writeFile(metadataPath, metadata);
@@ -213,7 +207,7 @@ app.post("/deploy-lambda", async (req, res) => {
     });
   }
 
-  AWS.config.update({ region: region });
+  AWS.config.update({ region });
   const lambdaFolder = path.join(projectLocation, functionName);
   const metadataPath = path.join(lambdaFolder, "metadata.txt");
 
@@ -291,6 +285,147 @@ app.post("/deploy-lambda", async (req, res) => {
   } catch (error) {
     console.error("Error deploying Lambda:", error);
     res.status(500).json({ error: "Failed to deploy Lambda function." });
+  }
+});
+
+app.post("/create-s3-bucket", async (req, res) => {
+  const { bucketName, region = "us-east-1" } = req.body;
+
+  if (!bucketName) {
+    return res
+      .status(400)
+      .json({ error: "Missing required field: bucketName" });
+  }
+
+  // Configure region
+  AWS.config.update({ region });
+
+  try {
+    const params = { Bucket: bucketName };
+    // Optionally specify CreateBucketConfiguration if region is NOT us-east-1
+    if (region !== "us-east-1") {
+      params.CreateBucketConfiguration = { LocationConstraint: region };
+    }
+    await s3.createBucket(params).promise();
+    res.json({ message: `Bucket '${bucketName}' created successfully.` });
+  } catch (error) {
+    console.error("Error creating S3 bucket:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/generate-s3-crud-lambda", async (req, res) => {
+  const {
+    functionName,
+    runtime = "nodejs18.x",
+    projectLocation,
+    bucketName,
+    region = "us-east-1",
+  } = req.body;
+
+  if (!functionName || !projectLocation || !bucketName) {
+    return res.status(400).json({
+      error:
+        "Missing required fields: functionName, projectLocation, or bucketName",
+    });
+  }
+
+  const lambdaCode = `
+const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+
+const REGION = "${region}";
+const BUCKET_NAME = "${bucketName}";
+
+const s3Client = new S3Client({ region: REGION });
+
+exports.handler = async (event) => {
+  const { httpMethod, pathParameters, body } = event;
+  const key = pathParameters?.key;
+
+  if (!key) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: "Missing object key in path parameters." }),
+    };
+  }
+
+  try {
+    switch (httpMethod) {
+      case "PUT":
+        if (!body) {
+          return { statusCode: 400, body: JSON.stringify({ error: "Missing request body." }) };
+        }
+        await s3Client.send(new PutObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+          Body: body,
+        }));
+        return {
+          statusCode: 200,
+          body: JSON.stringify({ message: \`Object '\${key}' created/updated.\` }),
+        };
+
+      case "GET":
+        const getUrl = await getSignedUrl(s3Client, new GetObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+        }), { expiresIn: 3600 });
+        return {
+          statusCode: 200,
+          body: JSON.stringify({ downloadUrl: getUrl }),
+        };
+
+      case "DELETE":
+        await s3Client.send(new DeleteObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+        }));
+        return {
+          statusCode: 200,
+          body: JSON.stringify({ message: \`Object '\${key}' deleted.\` }),
+        };
+
+      default:
+        return {
+          statusCode: 405,
+          body: JSON.stringify({ error: "Method Not Allowed" }),
+        };
+    }
+  } catch (error) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: error.message }),
+    };
+  }
+};
+  `.trim();
+
+  const lambdaDir = path.join(projectLocation, functionName);
+  try {
+    await fs.mkdir(lambdaDir, { recursive: true });
+    const filePath = path.join(lambdaDir, "index.js");
+    await fs.writeFile(filePath, lambdaCode);
+
+    // Write metadata for deployment
+    const metadata = `
+FunctionName: ${functionName}
+Runtime: ${runtime}
+Handler: index.handler
+    `.trim();
+    const metadataPath = path.join(lambdaDir, "metadata.txt");
+    await fs.writeFile(metadataPath, metadata);
+
+    res.json({
+      message: "S3 CRUD Lambda function generated successfully.",
+      directory: lambdaDir,
+      functionFile: filePath,
+    });
+  } catch (error) {
+    console.error("Error generating S3 CRUD Lambda function:", error);
+    res
+      .status(500)
+      .json({ error: "Failed to generate S3 CRUD Lambda function." });
   }
 });
 
