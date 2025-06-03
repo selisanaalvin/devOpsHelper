@@ -15,7 +15,7 @@ This project provides APIs to generate a `Dockerfile` and a `.gitlab-ci.yml` con
   - `aws configure`
 - To Run the Helper
   - `npm install`
-  - `npm install aws-sdk`
+  - `npm install @aws-sdk/s3-request-presigner @aws-sdk/client-lambda @aws-sdk/client-s3`
   - `npm run start`
 
 ### Dockerfile Generation

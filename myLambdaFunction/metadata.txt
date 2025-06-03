@@ -1,0 +1,3 @@
+FunctionName: myLambdaFunction
+Runtime: nodejs18.x
+Handler: index.handler

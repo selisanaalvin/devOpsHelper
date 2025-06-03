@@ -2,12 +2,24 @@ const express = require("express");
 const fs = require("fs").promises;
 const path = require("path");
 const bodyParser = require("body-parser");
-const AWS = require("aws-sdk");
+const {
+  S3Client,
+  CreateBucketCommand,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+} = require("@aws-sdk/client-s3");
+const {
+  LambdaClient,
+  CreateFunctionCommand,
+  UpdateFunctionCodeCommand,
+  GetFunctionCommand,
+} = require("@aws-sdk/client-lambda");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const archiver = require("archiver");
 
 const app = express();
 app.use(bodyParser.json());
-const lambda = new AWS.Lambda();
 
 // Generate Dockerfile
 app.post("/generate-dockerfile", async (req, res) => {
@@ -207,13 +219,13 @@ app.post("/deploy-lambda", async (req, res) => {
     });
   }
 
-  AWS.config.update({ region });
+  const lambdaClient = new LambdaClient({ region });
   const lambdaFolder = path.join(projectLocation, functionName);
   const metadataPath = path.join(lambdaFolder, "metadata.txt");
 
   try {
     // Read metadata.txt
-    const metadataRaw = await fsPromises.readFile(metadataPath, "utf8");
+    const metadataRaw = await fs.readFile(metadataPath, "utf8");
     const metadataLines = metadataRaw.split("\n");
     const meta = {};
     metadataLines.forEach((line) => {
@@ -246,22 +258,24 @@ app.post("/deploy-lambda", async (req, res) => {
     // Check if function exists
     let lambdaFunctionExists = false;
     try {
-      await lambda.getFunction({ FunctionName: meta.FunctionName }).promise();
+      await lambdaClient.send(
+        new GetFunctionCommand({ FunctionName: meta.FunctionName })
+      );
       lambdaFunctionExists = true;
     } catch (e) {
-      if (e.code !== "ResourceNotFoundException") throw e;
+      if (e.name !== "ResourceNotFoundException") throw e;
     }
 
-    const zipBuffer = await fsPromises.readFile(zipPath);
+    const zipBuffer = await fs.readFile(zipPath);
 
     if (lambdaFunctionExists) {
       // Update function code
-      const updateRes = await lambda
-        .updateFunctionCode({
+      const updateRes = await lambdaClient.send(
+        new UpdateFunctionCodeCommand({
           FunctionName: meta.FunctionName,
           ZipFile: zipBuffer,
         })
-        .promise();
+      );
       res.json({
         message: "Lambda function code updated successfully.",
         data: updateRes,
@@ -276,7 +290,9 @@ app.post("/deploy-lambda", async (req, res) => {
         Code: { ZipFile: zipBuffer },
         Publish: true,
       };
-      const createRes = await lambda.createFunction(createParams).promise();
+      const createRes = await lambdaClient.send(
+        new CreateFunctionCommand(createParams)
+      );
       res.json({
         message: "Lambda function created successfully.",
         data: createRes,
@@ -297,16 +313,15 @@ app.post("/create-s3-bucket", async (req, res) => {
       .json({ error: "Missing required field: bucketName" });
   }
 
-  // Configure region
-  AWS.config.update({ region });
+  const s3Client = new S3Client({ region });
 
   try {
     const params = { Bucket: bucketName };
-    // Optionally specify CreateBucketConfiguration if region is NOT us-east-1
     if (region !== "us-east-1") {
       params.CreateBucketConfiguration = { LocationConstraint: region };
     }
-    await s3.createBucket(params).promise();
+    await s3Client.send(new CreateBucketCommand(params));
+
     res.json({ message: `Bucket '${bucketName}' created successfully.` });
   } catch (error) {
     console.error("Error creating S3 bucket:", error);
