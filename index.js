@@ -1,229 +1,297 @@
 const express = require("express");
-const fs = require("fs");
+const fs = require("fs").promises;
 const path = require("path");
 const bodyParser = require("body-parser");
+const AWS = require("aws-sdk");
+const archiver = require("archiver");
 
 const app = express();
 app.use(bodyParser.json());
+const lambda = new AWS.Lambda();
 
-app.post("/generate-dockerfile", (req, res) => {
-  // POST /generate-dockerfile
-  // {
-  //   "projectLocation": "C:/ProjectLocation",
-  //   "image": "node:18",
-  //   "stages": ["build", "test", "deploy"],
-  //   "buildScript": ["npm install", "npm run build"],
-  //   "testScript": ["npm test"],
-  //   "deployScript": ["echo 'Deploying...'"],
-  //   "artifactsPath": "dist/",
-  //   "environment": "production",
-  //   "targetBranches": ["dev"],
-  //   "variables": {
-  //     "NODE_ENV": "production",
-  //     "API_KEY": "123456"
-  //   }
-  // }
-
+// Generate Dockerfile
+app.post("/generate-dockerfile", async (req, res) => {
   const {
-    baseImage,
-    workDir,
-    copy,
-    exposedPort,
+    baseImage = "node:latest",
+    workDir = "/app",
+    copy = "package*.json ./",
+    exposedPort = 3000,
     volume,
-    cmd,
+    cmd = ["node", "app.js"],
     extra,
     projectLocation,
   } = req.body;
 
-  // Validate input
   if (!projectLocation) {
-    return res
-      .status(400)
-      .json({ error: "Missing required fields. (projectLocation)" });
+    return res.status(400).json({
+      error: "Missing required field: projectLocation",
+    });
   }
 
-  // Generate Dockerfile content
   const dockerfileContent = `
-#Image Version (baseImage)
-FROM ${baseImage ? baseImage : `node:latest`}
-#Set Directory (workDir)
-WORKDIR ${workDir ? workDir : "/app"}
-COPY ${copy ? copy : `package*.json ./`}
-${baseImage ? `` : `RUN npm install`}
-${baseImage ? `` : `COPY . .`}
+# Base Image
+FROM ${baseImage}
 
-#Extra Command Like RUN (extra)
-${extra ? extra : ``}
+# Set Working Directory
+WORKDIR ${workDir}
 
-#Folders variable (volume)
-${volume ? `VOLUME ${JSON.stringify(volume)}` : ``}
+# Copy Files
+COPY ${copy}
 
-#Port Exposed (exposedPort)
-EXPOSE ${exposedPort ? exposedPort : `3000`}
-#CMD or Command (cmd)
-CMD ${cmd ? JSON.stringify(cmd) : `["node","app.js"]`}
-    `;
+# Install Dependencies (if node is used)
+${baseImage.startsWith("node") ? "RUN npm install" : ""}
 
-  // Save the Dockerfile to the filesystem
-  const filePath = path.join(projectLocation, "Dockerfile");
-  fs.writeFile(filePath, dockerfileContent.trim(), (err) => {
-    if (err) {
-      console.error("Error writing Dockerfile:", err);
-      return res.status(500).json({ error: "Failed to write Dockerfile." });
-    }
+# Extra Commands
+${extra || ""}
 
-    // Respond with success and Dockerfile content
+# Volumes
+${volume ? `VOLUME ${JSON.stringify(volume)}` : ""}
+
+# Expose Port
+EXPOSE ${exposedPort}
+
+# Default Command
+CMD ${JSON.stringify(cmd)}
+  `.trim();
+
+  try {
+    const filePath = path.join(projectLocation, "Dockerfile");
+    await fs.writeFile(filePath, dockerfileContent);
     res.json({
       message: "Dockerfile created successfully.",
+      filePath,
     });
-  });
+  } catch (error) {
+    console.error("Error writing Dockerfile:", error);
+    res.status(500).json({ error: "Failed to write Dockerfile." });
+  }
 });
 
-app.post("/generate-gitlab-ci", (req, res) => {
-  // POST /generate-gitlab-ci
-  //   {
-  //   "projectLocation": "C:/ProjectLocation",
-  //   "image": "node:18",
-  //   "stages": ["build", "test", "deploy"],
-  //   "buildScript": ["npm install", "npm run build"],
-  //   "testScript": ["npm test"],
-  //   "deployScript": ["echo 'Deploying...'"],
-  //   "artifactsPath": "dist/",
-  //   "environment": "production",
-  //   "targetBranches": ["dev"],
-  //   "variables": {
-  //     "NODE_ENV": "production",
-  //     "API_KEY": "123456"
-  //   }
-  // }
-
+// Generate .gitlab-ci.yml
+app.post("/generate-gitlab-ci", async (req, res) => {
   const {
-    image,
-    stages,
+    image = "node:latest",
+    stages = [],
     buildScript,
     testScript,
     deployScript,
-    artifactsPath,
-    environment,
+    artifactsPath = "build/",
+    environment = "production",
     projectLocation,
-    targetBranches, // Array of branches (e.g., ["main", "develop"])
-    variables, // Object containing key-value pairs of variables
+    targetBranches = [],
+    variables,
   } = req.body;
 
-  // Validate input
-  if (!projectLocation || !stages || !stages.length || !targetBranches) {
+  if (!projectLocation || stages.length === 0 || targetBranches.length === 0) {
     return res.status(400).json({
       error:
-        "Missing required fields. Ensure stages and targetBranches are provided.",
+        "Missing required fields: projectLocation, stages, or targetBranches",
     });
   }
 
-  // Generate variables section
   const variablesSection = variables
-    ? `
-variables:
-${Object.entries(variables)
-  .map(([key, value]) => `  ${key}: "${value}"`)
-  .join("\n")}
-`
+    ? `variables:\n${Object.entries(variables)
+        .map(([key, value]) => `  ${key}: "${value}"`)
+        .join("\n")}`
     : "";
 
-  // Generate GitLab CI/CD pipeline configuration
   const gitlabCIContent = `
-# Use the specified Docker image
-image: ${image ? image : "node:latest"}
+image: ${image}
 
-# Define variables
 ${variablesSection}
 
-# Define stages
 stages:
 ${stages.map((stage) => `  - ${stage}`).join("\n")}
 
-# Build Stage
-${
-  stages.includes("build")
-    ? `
-build:
-  stage: build
-  script:
-${
-  buildScript
-    ? buildScript.map((cmd) => `    - ${cmd}`).join("\n")
-    : `    - echo "No build commands provided."`
-}
-  artifacts:
-    paths:
-${artifactsPath ? `      - ${artifactsPath}` : `      - build/`}
-  retry: 2
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: always
-      only:
-        - ${targetBranches.join("\n        - ")}
-`
-    : ""
-}
-
-# Test Stage
-${
-  stages.includes("test")
-    ? `
-test:
-  stage: test
-  script:
-${
-  testScript
-    ? testScript.map((cmd) => `    - ${cmd}`).join("\n")
-    : `    - echo "No test commands provided."`
-}
-  retry: 2
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: always
-      only:
-        - ${targetBranches.join("\n        - ")}
-`
-    : ""
-}
-
-# Deploy Stage
-${
-  stages.includes("deploy")
-    ? `
-deploy:
-  stage: deploy
-  script:
-${
-  deployScript
-    ? deployScript.map((cmd) => `    - ${cmd}`).join("\n")
-    : `    - echo "No deploy commands provided."`
-}
-  environment:
-    name: ${environment ? environment : "development"}
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: always
-      only:
-        - ${targetBranches.join("\n        - ")}
-`
-    : ""
-}
-  `;
-
-  // Save the GitLab CI file to the filesystem
-  const filePath = path.join(projectLocation, ".gitlab-ci.yml");
-  fs.writeFile(filePath, gitlabCIContent.trim(), (err) => {
-    if (err) {
-      console.error("Error writing .gitlab-ci.yml:", err);
-      return res.status(500).json({ error: "Failed to write .gitlab-ci.yml." });
+${stages
+  .map((stage) => {
+    let script = "";
+    if (stage === "build") {
+      script = buildScript
+        ? buildScript.map((cmd) => `    - ${cmd}`).join("\n")
+        : `    - echo "No build commands provided."`;
+    } else if (stage === "test") {
+      script = testScript
+        ? testScript.map((cmd) => `    - ${cmd}`).join("\n")
+        : `    - echo "No test commands provided."`;
+    } else if (stage === "deploy") {
+      script = deployScript
+        ? deployScript.map((cmd) => `    - ${cmd}`).join("\n")
+        : `    - echo "No deploy commands provided."`;
     }
 
-    // Respond with success and .gitlab-ci.yml content
+    const stageName = stage.charAt(0).toUpperCase() + stage.slice(1);
+    return `
+${stage}:
+  stage: ${stage}
+  script:
+${script}
+  ${stage === "build" ? `artifacts:\n    paths:\n      - ${artifactsPath}` : ""}
+  ${stage === "deploy" ? `environment:\n    name: ${environment}` : ""}
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+      only:
+${targetBranches.map((branch) => `        - ${branch}`).join("\n")}`;
+  })
+  .join("\n")}
+  `.trim();
+
+  try {
+    const filePath = path.join(projectLocation, ".gitlab-ci.yml");
+    await fs.writeFile(filePath, gitlabCIContent);
     res.json({
       message: ".gitlab-ci.yml created successfully.",
+      filePath,
     });
-  });
+  } catch (error) {
+    console.error("Error writing .gitlab-ci.yml:", error);
+    res.status(500).json({ error: "Failed to write .gitlab-ci.yml." });
+  }
+});
+
+// Generate Lambda Function
+app.post("/generate-lambda-function", async (req, res) => {
+  const {
+    functionName,
+    handler,
+    runtime = "nodejs18.x",
+    projectLocation,
+  } = req.body;
+
+  if (!functionName || !handler || !projectLocation) {
+    return res.status(400).json({
+      error:
+        "Missing required fields: functionName, handler, or projectLocation",
+    });
+  }
+
+  const lambdaFileContent = `
+exports.${handler} = async (event, context) => {
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ message: "Hello from Lambda!" }),
+  };
+};
+  `.trim();
+
+  const lambdaDirectory = path.join(projectLocation, functionName);
+
+  try {
+    // Create Lambda folder and write function code
+    await fs.mkdir(lambdaDirectory, { recursive: true });
+    const filePath = path.join(lambdaDirectory, "index.js");
+    await fs.writeFile(filePath, lambdaFileContent);
+
+    // Generate metadata for deployment
+    const metadata = `
+FunctionName: ${functionName}
+Runtime: ${runtime}
+Handler: index.${handler}
+    `.trim();
+    const metadataPath = path.join(lambdaDirectory, "metadata.txt");
+    await fs.writeFile(metadataPath, metadata);
+
+    res.json({
+      message: "Lambda function created successfully.",
+      directory: lambdaDirectory,
+      functionFile: filePath,
+    });
+  } catch (error) {
+    console.error("Error creating Lambda function:", error);
+    res.status(500).json({ error: "Failed to create Lambda function." });
+  }
+});
+
+app.post("/deploy-lambda", async (req, res) => {
+  const { projectLocation, region, functionName, roleArn } = req.body;
+
+  if (!projectLocation || !region || !functionName || !roleArn) {
+    return res.status(400).json({
+      error:
+        "Missing required fields: projectLocation, functionName, and roleArn are required.",
+    });
+  }
+
+  AWS.config.update({ region: region });
+  const lambdaFolder = path.join(projectLocation, functionName);
+  const metadataPath = path.join(lambdaFolder, "metadata.txt");
+
+  try {
+    // Read metadata.txt
+    const metadataRaw = await fsPromises.readFile(metadataPath, "utf8");
+    const metadataLines = metadataRaw.split("\n");
+    const meta = {};
+    metadataLines.forEach((line) => {
+      const [key, value] = line.split(":").map((s) => s.trim());
+      if (key && value) {
+        meta[key] = value;
+      }
+    });
+
+    if (!meta.FunctionName || !meta.Runtime || !meta.Handler) {
+      return res
+        .status(400)
+        .json({ error: "metadata.txt is missing required fields." });
+    }
+
+    // Zip the lambda folder
+    const zipPath = path.join(projectLocation, `${functionName}.zip`);
+    await new Promise((resolve, reject) => {
+      const output = fs.createWriteStream(zipPath);
+      const archive = archiver("zip", { zlib: { level: 9 } });
+
+      output.on("close", () => resolve());
+      archive.on("error", (err) => reject(err));
+
+      archive.pipe(output);
+      archive.directory(lambdaFolder, false);
+      archive.finalize();
+    });
+
+    // Check if function exists
+    let lambdaFunctionExists = false;
+    try {
+      await lambda.getFunction({ FunctionName: meta.FunctionName }).promise();
+      lambdaFunctionExists = true;
+    } catch (e) {
+      if (e.code !== "ResourceNotFoundException") throw e;
+    }
+
+    const zipBuffer = await fsPromises.readFile(zipPath);
+
+    if (lambdaFunctionExists) {
+      // Update function code
+      const updateRes = await lambda
+        .updateFunctionCode({
+          FunctionName: meta.FunctionName,
+          ZipFile: zipBuffer,
+        })
+        .promise();
+      res.json({
+        message: "Lambda function code updated successfully.",
+        data: updateRes,
+      });
+    } else {
+      // Create function
+      const createParams = {
+        FunctionName: meta.FunctionName,
+        Runtime: meta.Runtime,
+        Role: roleArn,
+        Handler: meta.Handler,
+        Code: { ZipFile: zipBuffer },
+        Publish: true,
+      };
+      const createRes = await lambda.createFunction(createParams).promise();
+      res.json({
+        message: "Lambda function created successfully.",
+        data: createRes,
+      });
+    }
+  } catch (error) {
+    console.error("Error deploying Lambda:", error);
+    res.status(500).json({ error: "Failed to deploy Lambda function." });
+  }
 });
 
 // Start the server

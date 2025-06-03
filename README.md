@@ -6,15 +6,19 @@ This project provides APIs to generate a `Dockerfile` and a `.gitlab-ci.yml` con
 
 - API to generate a `Dockerfile` for a Node.js application.
 - API to generate a `.gitlab-ci.yml` file with build, test, and deploy stages.
+- API to generate a `Lambda Function` file
+- API to deploy the `Lambda Function` you created
 
 ## Usage
 
 ### Dockerfile Generation
 
 #### Endpoint
+
 `POST /generate-dockerfile`
 
 #### Payload
+
 ```json
 {
   "projectLocation": "C:/ProjectLocation",
@@ -22,7 +26,7 @@ This project provides APIs to generate a `Dockerfile` and a `.gitlab-ci.yml` con
   "stages": ["build", "test", "deploy"],
   "buildScript": ["npm install", "npm run build"],
   "testScript": ["npm test"],
-  "deployScript": ["echo 'Deploying...'"] ,
+  "deployScript": ["echo 'Deploying...'"],
   "artifactsPath": "dist/",
   "environment": "production",
   "targetBranches": ["dev"],
@@ -36,9 +40,11 @@ This project provides APIs to generate a `Dockerfile` and a `.gitlab-ci.yml` con
 ### GitLab CI/CD Configuration Generation
 
 #### Endpoint
+
 `POST /generate-gitlab-ci`
 
 #### Payload
+
 ```json
 {
   "projectLocation": "C:/ProjectLocation",
@@ -46,7 +52,7 @@ This project provides APIs to generate a `Dockerfile` and a `.gitlab-ci.yml` con
   "stages": ["build", "test", "deploy"],
   "buildScript": ["npm install", "npm run build"],
   "testScript": ["npm test"],
-  "deployScript": ["echo 'Deploying...'"] ,
+  "deployScript": ["echo 'Deploying...'"],
   "artifactsPath": "dist/",
   "environment": "production",
   "targetBranches": ["dev"],
@@ -57,46 +63,36 @@ This project provides APIs to generate a `Dockerfile` and a `.gitlab-ci.yml` con
 }
 ```
 
-### Example cURL Commands
+### Lambda Function Generation
 
-#### Generate Dockerfile
-```bash
-curl -X POST http://localhost:3000/generate-dockerfile \
--H "Content-Type: application/json" \
--d '{
+#### Endpoint
+
+`POST /generate-lambda-function`
+
+#### Payload
+
+```json
+{
   "projectLocation": "C:/ProjectLocation",
-  "image": "node:18",
-  "stages": ["build", "test", "deploy"],
-  "buildScript": ["npm install", "npm run build"],
-  "testScript": ["npm test"],
-  "deployScript": ["echo 'Deploying...'"] ,
-  "artifactsPath": "dist/",
-  "environment": "production",
-  "targetBranches": ["dev"],
-  "variables": {
-    "NODE_ENV": "production",
-    "API_KEY": "123456"
-  }
-}'
+  "functionName": "myLambdaFunction",
+  "handler": "handler",
+  "runtime": "nodejs18.x"
+}
 ```
 
-#### Generate GitLab CI/CD
-```bash
-curl -X POST http://localhost:3000/generate-gitlab-ci \
--H "Content-Type: application/json" \
--d '{
+### Lambda Function Generation
+
+#### Endpoint
+
+`POST /deploy-lambda`
+
+#### Payload
+
+```json
+{
   "projectLocation": "C:/ProjectLocation",
-  "image": "node:18",
-  "stages": ["build", "test", "deploy"],
-  "buildScript": ["npm install", "npm run build"],
-  "testScript": ["npm test"],
-  "deployScript": ["echo 'Deploying...'"] ,
-  "artifactsPath": "dist/",
-  "environment": "production",
-  "targetBranches": ["dev"],
-  "variables": {
-    "NODE_ENV": "production",
-    "API_KEY": "123456"
-  }
-}'
+  "region": "us-east-1",
+  "functionName": "myLambdaFunction",
+  "roleArn": "arn:aws:iam::123456789012:role/YourLambdaExecutionRole"
+}
 ```
