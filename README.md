@@ -29,18 +29,13 @@ This project provides APIs to generate a `Dockerfile` and a `.gitlab-ci.yml` con
 ```json
 {
   "projectLocation": "C:/ProjectLocation",
-  "image": "node:18",
-  "stages": ["build", "test", "deploy"],
-  "buildScript": ["npm install", "npm run build"],
-  "testScript": ["npm test"],
-  "deployScript": ["echo 'Deploying...'"],
-  "artifactsPath": "dist/",
-  "environment": "production",
-  "targetBranches": ["dev"],
-  "variables": {
-    "NODE_ENV": "production",
-    "API_KEY": "123456"
-  }
+  "baseImage": "node:18",
+  "workDir": "/app",
+  "copy": ". .",
+  "exposedPort": "5000",
+  "volume": ["app/created_files", "app/downloaded_files"],
+  "cmd": ["node", "app.js"],
+  "extra": "any command"
 }
 ```
 
