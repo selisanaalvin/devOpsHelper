@@ -1,4 +1,4 @@
-# Generate Dockerfile and GitLab CI
+# Generate DevOps Helper
 
 This project provides APIs to generate a `Dockerfile` and a `.gitlab-ci.yml` configuration for a Node.js project using specific payloads.
 
