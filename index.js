@@ -1,5 +1,6 @@
 const express = require("express");
-const fs = require("fs").promises;
+const fs = require("fs");
+const fsp = require("fs").promises;
 const path = require("path");
 const bodyParser = require("body-parser");
 const {
@@ -87,7 +88,7 @@ app.post("/generate-gitlab-ci", async (req, res) => {
     buildScript,
     testScript,
     deployScript,
-    artifactsPath = "build/",
+    artifactsPath = "dist/",
     environment = "production",
     projectLocation,
     targetBranches = [],
@@ -225,7 +226,7 @@ app.post("/deploy-lambda", async (req, res) => {
 
   try {
     // Read metadata.txt
-    const metadataRaw = await fs.readFile(metadataPath, "utf8");
+    const metadataRaw = await fsp.readFile(metadataPath, "utf8");
     const metadataLines = metadataRaw.split("\n");
     const meta = {};
     metadataLines.forEach((line) => {
@@ -266,7 +267,7 @@ app.post("/deploy-lambda", async (req, res) => {
       if (e.name !== "ResourceNotFoundException") throw e;
     }
 
-    const zipBuffer = await fs.readFile(zipPath);
+    const zipBuffer = await fsp.readFile(zipPath);
 
     if (lambdaFunctionExists) {
       // Update function code
